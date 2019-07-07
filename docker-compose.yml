@@ -1,0 +1,159 @@
+version: '3.6'
+services:
+  elasticsearch:
+    image: 'docker.elastic.co/elasticsearch/elasticsearch:6.6.0'
+    container_name: elasticsearch
+    environment:
+      - cluster.name=docker-cluster
+      - bootstrap.memory_lock=true
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - 'esdata:/usr/share/elasticsearch/data'
+    ports:
+      - '9200:9200'
+    networks:
+      - MyNetwork
+  kibana:
+    image: 'docker.elastic.co/kibana/kibana:6.6.0'
+    container_name: kibana
+    ports:
+      - '5601:5601'
+    environment:
+      - 'ELASTICSEARCH_URL=http://elasticsearch:9200'
+    networks:
+      - MyNetwork
+    depends_on:
+      - elasticsearch
+  zookeeper:
+    container_name: zookeeper
+    image: confluentinc/cp-zookeeper
+    hostname: zookeeper
+    volumes:
+      - 'zookeeper-data:/var/lib/zookeeper'
+    networks:
+      - MyNetwork
+    ports:
+      - '2181:2181'
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+  kafka:
+    image: confluentinc/cp-kafka
+    container_name: kafka
+    hostname: kafka
+    volumes:
+      - 'kafka-data:/var/lib/kafka'
+    networks:
+      - MyNetwork
+    ports:
+      - '9092:9092'
+    depends_on:
+      - zookeeper
+    restart: 'on-failure:5'
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_ADVERTISED_LISTENERS: 'LISTENER_DOCKER_INTERNAL://kafka:19092,LISTENER_DOCKER_EXTERNAL://${DOCKER_HOST_IP:-127.0.0.1}:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'LISTENER_DOCKER_INTERNAL:PLAINTEXT,LISTENER_DOCKER_EXTERNAL:PLAINTEXT'
+      KAFKA_INTER_BROKER_LISTENER_NAME: LISTENER_DOCKER_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9091
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+  kafkahq:
+    image: tchiotludo/kafkahq
+    container_name: kafkahq
+    networks:
+      - MyNetwork
+    depends_on:
+      - kafka
+      - zookeeper
+    environment:
+      MICRONAUT_APPLICATION_JSON: |
+        {
+          "kafkahq": {
+            "connections": {
+              "docker-kafka-server": {
+                  "properties": {
+                    "bootstrap.servers": "PLAINTEXT://kafka:19092"
+                  }
+              }
+            }
+          }
+        }
+    ports:
+      - '7070:8080'
+  redis:
+    image: 'bitnami/redis:latest'
+    container_name: redis
+    networks:
+      - MyNetwork
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    labels:
+      kompose.service.type: nodeport
+    ports:
+      - '6379:6379'
+    volumes:
+      - 'redis_data:/bitnami/redis'
+  minio:
+    container_name: minio
+    hostname: minio
+    image: 'minio/minio:latest'
+    networks:
+      - MyNetwork
+    volumes:
+      - 'minio_data:/data'
+    ports:
+      - '9000:9000'
+    environment:
+      MINIO_ACCESS_KEY: minio
+      MINIO_SECRET_KEY: minio123
+    command: server /data
+  neo4j:
+    image: 'neo4j:3.5.3'
+    container_name: neo4j
+    networks:
+      - MyNetwork
+    ports:
+      - '7474:7474'
+      - '6477:6477'
+      - '7687:7687'
+    volumes:
+      - 'neo4j_conf:/conf'
+      - 'neo4j_data:/data'
+      - 'neo4j_logs:/logs'
+      - 'neo4j_plugins:/plugins'
+    environment:
+      - NEO4J_AUTH=neo4j/qwerty1!
+      - NEO4J_dbms_mode=CORE
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+      - 'NEO4J_dbms_connector_http_listen__address=:7474'
+      - 'NEO4J_dbms_connector_https_listen__address=:6477'
+      - 'NEO4J_dbms_connector_bolt_listen__address=:7687'
+volumes:
+  esdata:
+    driver: local
+  zookeeper-data:
+    driver: local
+  kafka-data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+  neo4j_conf:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  neo4j_plugins:
+    driver: local
+networks:
+  MyNetwork:
+    external:
+      name: myNet
